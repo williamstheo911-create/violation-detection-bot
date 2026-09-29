@@ -1,4 +1,5 @@
-streamlit
+pyTelegramBotAPI
 google-genai
 pypdf
 pillow
+requests
