@@ -1,4 +1,4 @@
 streamlit
-openai
-requests
+google-genai
 pypdf
+pillow
