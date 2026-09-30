@@ -3,14 +3,14 @@ import telebot
 from google import genai
 from google.genai import types
 
-# 1. Load Environment Variables
+# 1. Load Environment Variables matching Railway setup
 TELEGRAM_BOT_TOKEN = os.getenv("Telegram_Token")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not TELEGRAM_BOT_TOKEN or not GEMINI_API_KEY:
     raise ValueError("Missing Telegram_Token or GEMINI_API_KEY in environment variables.")
 
-# 2. Initialize Telegram Bot and Gemini Client
+# 2. Initialize Telegram Bot and Gemini Client (explicitly passing the API key)
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 client = genai.Client(api_key=GEMINI_API_KEY)
 
@@ -28,7 +28,7 @@ Provide a clear, concise report:
 def send_welcome(message):
     bot.reply_to(
         message, 
-        "Hello! Send me any document, photo, or image (like a Driver/Vehicle Examination Report), and I will scan it for violations and send the results directly here."
+        "Hello! Send me any inspection report, photo, or document, and I will scan it for violations directly here."
     )
 
 # Handle Photos
@@ -37,34 +37,28 @@ def handle_photo(message):
     try:
         bot.send_chat_action(message.chat.id, 'typing')
         
-        # Get the highest resolution photo
-        fileID = message.photo[-1].file_id
-        file_info = bot.get_file(fileID)
+        # Get highest resolution photo
+        file_info = bot.get_file(message.photo[-1].file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
-        # Save temporarily
-        temp_path = "temp_image.jpg"
-        with open(temp_path, 'wb') as new_file:
-            new_file.write(downloaded_file)
-            
-        # Upload to Gemini File API and analyze using gemini-1.5-flash
-        uploaded_file = client.files.upload(file=temp_path)
+        # Pass bytes directly to Gemini using types.Part.from_bytes
         response = client.models.generate_content(
-            model='gemini-1.5-flash',
-            contents=[uploaded_file, VIOLATION_PROMPT]
+            model='gemini-2.5-flash',
+            contents=[
+                types.Part.from_bytes(
+                    data=downloaded_file,
+                    mime_type='image/jpeg',
+                ),
+                VIOLATION_PROMPT
+            ]
         )
         
-        # Clean up local file
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-            
-        # Send result back to the Telegram chat
         bot.reply_to(message, response.text)
         
     except Exception as e:
         bot.reply_to(message, f"❌ Error processing image: {str(e)}")
 
-# Handle Documents (PDFs, Images as files, etc.)
+# Handle Documents (PDFs, etc.)
 @bot.message_handler(content_types=['document'])
 def handle_document(message):
     try:
@@ -73,24 +67,22 @@ def handle_document(message):
         file_info = bot.get_file(message.document.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
-        file_name = message.document.file_name or "temp_doc"
-        temp_path = f"temp_{file_name}"
+        # Determine mime type based on file extension
+        file_name = message.document.file_name or ""
+        mime_type = 'application/pdf' if file_name.lower().endswith('.pdf') else 'image/jpeg'
         
-        with open(temp_path, 'wb') as new_file:
-            new_file.write(downloaded_file)
-            
-        # Upload to Gemini File API and analyze using gemini-1.5-flash
-        uploaded_file = client.files.upload(file=temp_path)
+        # Pass bytes directly to Gemini
         response = client.models.generate_content(
-            model='gemini-1.5-flash',
-            contents=[uploaded_file, VIOLATION_PROMPT]
+            model='gemini-2.5-flash',
+            contents=[
+                types.Part.from_bytes(
+                    data=downloaded_file,
+                    mime_type=mime_type,
+                ),
+                VIOLATION_PROMPT
+            ]
         )
         
-        # Clean up local file
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-            
-        # Send result back to the Telegram chat
         bot.reply_to(message, response.text)
         
     except Exception as e:
