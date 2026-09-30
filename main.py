@@ -1,4 +1,5 @@
 import os
+import time
 import telebot
 from google import genai
 from google.genai import types
@@ -31,6 +32,29 @@ def send_welcome(message):
         "Hello! Send me any inspection report photo or document, and I will scan it for violations directly here."
     )
 
+def generate_with_retry(contents, mime_type):
+    """Helper function to retry if the model is temporarily overloaded (503)"""
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model='gemini-3.8-flash',
+                contents=[
+                    types.Part.from_bytes(
+                        data=contents,
+                        mime_type=mime_type,
+                    ),
+                    VIOLATION_PROMPT
+                ]
+            )
+            return response.text
+        except Exception as e:
+            error_str = str(e)
+            if "503" in error_str and attempt < max_retries - 1:
+                time.sleep(2) # Wait 2 seconds before retrying
+                continue
+            raise e
+
 # Handle Photos
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
@@ -40,22 +64,14 @@ def handle_photo(message):
         file_info = bot.get_file(message.photo[-1].file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
-        # Using the stable gemini-2.5-flash model
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=[
-                types.Part.from_bytes(
-                    data=downloaded_file,
-                    mime_type='image/jpeg',
-                ),
-                VIOLATION_PROMPT
-            ]
-        )
-        
-        bot.reply_to(message, response.text)
+        result_text = generate_with_retry(downloaded_file, 'image/jpeg')
+        bot.reply_to(message, result_text)
         
     except Exception as e:
-        bot.reply_to(message, f"❌ Error processing image: {str(e)}")
+        if "503" in str(e):
+            bot.reply_to(message, "⚠️ Google's servers are experiencing high demand right now. Please wait 10 seconds and try sending the photo again.")
+        else:
+            bot.reply_to(message, f"❌ Error processing image: {str(e)}")
 
 # Handle Documents
 @bot.message_handler(content_types=['document'])
@@ -69,21 +85,14 @@ def handle_document(message):
         file_name = message.document.file_name or ""
         mime_type = 'application/pdf' if file_name.lower().endswith('.pdf') else 'image/jpeg'
         
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=[
-                types.Part.from_bytes(
-                    data=downloaded_file,
-                    mime_type=mime_type,
-                ),
-                VIOLATION_PROMPT
-            ]
-        )
-        
-        bot.reply_to(message, response.text)
+        result_text = generate_with_retry(downloaded_file, mime_type)
+        bot.reply_to(message, result_text)
         
     except Exception as e:
-        bot.reply_to(message, f"❌ Error processing document: {str(e)}")
+        if "503" in str(e):
+            bot.reply_to(message, "⚠️ Google's servers are experiencing high demand right now. Please wait 10 seconds and try sending the document again.")
+        else:
+            bot.reply_to(message, f"❌ Error processing document: {str(e)}")
 
 if __name__ == "__main__":
     print("Bot is starting and polling for messages...")
