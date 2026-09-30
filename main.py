@@ -3,18 +3,18 @@ import telebot
 from google import genai
 from google.genai import types
 
-# 1. Загрузка переменных окружения
+# 1. Load Environment Variables
 TELEGRAM_BOT_TOKEN = os.getenv("Telegram_Token")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not TELEGRAM_BOT_TOKEN or not GEMINI_API_KEY:
     raise ValueError("Missing Telegram_Token or GEMINI_API_KEY in environment variables.")
 
-# 2. Инициализация бота и клиента Gemini
+# 2. Initialize Telegram Bot and Gemini Client
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Промпт для поиска нарушений
+# System prompt defining what violations to check for
 VIOLATION_PROMPT = """
 You are an expert compliance and document auditor. Analyze the provided image, document, or text 
 for any compliance violations, discrepancies, policy breaches, or anomalies. 
@@ -28,10 +28,10 @@ Provide a clear, concise report:
 def send_welcome(message):
     bot.reply_to(
         message, 
-        "Привет! Отправьте мне фото отчета или документ, и я проверю его на наличие нарушений."
+        "Hello! Send me any inspection report photo or document, and I will scan it for violations directly here."
     )
 
-# Обработка фотографий
+# Handle Photos
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     try:
@@ -40,9 +40,9 @@ def handle_photo(message):
         file_info = bot.get_file(message.photo[-1].file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
-        # Используем актуальную модель gemini-3.8-flash
+        # Using gemini-1.5-flash for maximum stability and compatibility
         response = client.models.generate_content(
-            model='gemini-3.8-flash',
+            model='gemini-1.5-flash',
             contents=[
                 types.Part.from_bytes(
                     data=downloaded_file,
@@ -55,9 +55,9 @@ def handle_photo(message):
         bot.reply_to(message, response.text)
         
     except Exception as e:
-        bot.reply_to(message, f"❌ Ошибка обработки изображения: {str(e)}")
+        bot.reply_to(message, f"❌ Error processing image: {str(e)}")
 
-# Обработка документов
+# Handle Documents
 @bot.message_handler(content_types=['document'])
 def handle_document(message):
     try:
@@ -70,7 +70,7 @@ def handle_document(message):
         mime_type = 'application/pdf' if file_name.lower().endswith('.pdf') else 'image/jpeg'
         
         response = client.models.generate_content(
-            model='gemini-3.8-flash',
+            model='gemini-1.5-flash',
             contents=[
                 types.Part.from_bytes(
                     data=downloaded_file,
@@ -83,8 +83,8 @@ def handle_document(message):
         bot.reply_to(message, response.text)
         
     except Exception as e:
-        bot.reply_to(message, f"❌ Ошибка обработки документа: {str(e)}")
+        bot.reply_to(message, f"❌ Error processing document: {str(e)}")
 
 if __name__ == "__main__":
-    print("Бот запущен и ожидает сообщения...")
+    print("Bot is starting and polling for messages...")
     bot.infinity_polling()
