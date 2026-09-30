@@ -2,96 +2,101 @@ import os
 import telebot
 from google import genai
 from google.genai import types
-import io
-import pypdf
 
-# Get credentials from Railway environment variables
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+# 1. Load Environment Variables
+TELEGRAM_BOT_TOKEN = os.getenv("Telegram_Token")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not TELEGRAM_BOT_TOKEN or not GEMINI_API_KEY:
-    print("Error: Missing TELEGRAM_BOT_TOKEN or GEMINI_API_KEY in environment variables.")
+    raise ValueError("Missing Telegram_Token or GEMINI_API_KEY in environment variables.")
 
+# 2. Initialize Telegram Bot and Gemini Client
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Default violation rulebook
-DEFAULT_RULES = (
-    "1. Check for missing mandatory legal clauses, weights, or liability limits.\n"
-    "2. Detect safety gear violations (e.g., missing hardhats, vests) in pictures.\n"
-    "3. Look for expired dates, incorrect formatting, or unauthorized terms."
-)
+# System prompt defining what violations to check for
+VIOLATION_PROMPT = """
+You are an expert compliance and document auditor. Analyze the provided image, document, or text 
+for any compliance violations, discrepancies, policy breaches, or anomalies. 
+Provide a clear, concise report:
+1. **Status:** (Compliant / Violation Found / Needs Review)
+2. **Details:** Explain what was found.
+3. **Recommendation:** What action should be taken.
+"""
 
-@bot.message_handler(commands=['start'])
+@bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
-    bot.reply_to(message, "👋 Hello! Send me any picture (like an inspection report or safety photo) or a PDF document, and I will check it for violations instantly!")
+    bot.reply_to(
+        message, 
+        "Hello! Send me any document, photo, or image, and I will scan it for violations and send the results directly here."
+    )
 
-@bot.message_handler(content_types=['photo', 'document'])
-def handle_incoming_file(message):
+# Handle Photos
+@bot.message_handler(content_types=['photo'])
+def handle_photo(message):
     try:
-        bot.reply_to(message, "🔍 Analyzing file for violations, please wait...")
+        bot.send_chat_action(message.chat.id, 'typing')
         
-        file_info = None
-        file_extension = ""
-        
-        # Handle photos sent directly to the chat
-        if message.content_type == 'photo':
-            file_id = message.photo[-1].file_id
-            file_info = bot.get_file(file_id)
-            file_extension = "jpg"
-            
-        # Handle documents/PDFs sent as files
-        elif message.content_type == 'document':
-            file_info = bot.get_file(message.document.file_id)
-            file_extension = message.document.file_name.split('.')[-1].lower()
-
+        # Get the highest resolution photo
+        fileID = message.photo[-1].file_id
+        file_info = bot.get_file(fileID)
         downloaded_file = bot.download_file(file_info.file_path)
         
-        contents = []
-        prompt = (
-            f"You are an expert compliance auditor. Analyze the attached file strictly against these rules:\n"
-            f"{DEFAULT_RULES}\n\n"
-            f"Provide a clear, structured report listing:\n"
-            f"1. Overall Status (PASS / FAIL)\n"
-            f"2. Detected Violations (with severity and descriptions)\n"
-            f"3. Recommendations for Correction"
-        )
-        contents.append(prompt)
-
-        # Attach image to Gemini
-        if file_extension in ["png", "jpg", "jpeg"]:
-            contents.append(types.Part.from_bytes(data=downloaded_file, mime_type=f"image/{file_extension}"))
+        # Save temporarily
+        temp_path = "temp_image.jpg"
+        with open(temp_path, 'wb') as new_file:
+            new_file.write(downloaded_file)
             
-        # Attach PDF text to Gemini
-        elif file_extension == "pdf":
-            reader = pypdf.PdfReader(io.BytesIO(downloaded_file))
-            pdf_text = ""
-            for page in reader.pages:
-                text = page.extract_text()
-                if text:
-                    pdf_text += text + "\n"
-            contents.append(f"Document Text Content:\n{pdf_text}")
-        else:
-            bot.reply_to(message, "⚠️ Unsupported file format. Please send an image (JPG/PNG) or a PDF.")
-            return
-
-        # Call Gemini 1.5 Flash model
+        # Upload to Gemini File API and analyze
+        uploaded_file = client.files.upload(file=temp_path)
         response = client.models.generate_content(
-            model='gemini-1.5-flash',
-            contents=contents
+            model='gemini-2.5-flash',
+            contents=[uploaded_file, VIOLATION_PROMPT]
         )
-
-        report = f"🚨 *Violation & Compliance Report*\n\n{response.text}"
         
-        # Truncate if message is too long for Telegram
-        if len(report) > 4000:
-            report = report[:4000] + "\n\n[Report truncated due to length]"
-
-        bot.reply_to(message, report, parse_mode='Markdown')
-
+        # Clean up local file
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+            
+        # Send result back to the Telegram chat
+        bot.reply_to(message, response.text)
+        
     except Exception as e:
-        bot.reply_to(message, f"❌ An error occurred during analysis: {e}")
+        bot.reply_to(message, f"❌ Error processing image: {str(e)}")
 
-if __name__ == '__main__':
-    print("Bot is polling for messages...")
+# Handle Documents (PDFs, Images as files, etc.)
+@bot.message_handler(content_types=['document'])
+def handle_document(message):
+    try:
+        bot.send_chat_action(message.chat.id, 'typing')
+        
+        file_info = bot.get_file(message.document.file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        
+        file_name = message.document.file_name or "temp_doc"
+        temp_path = f"temp_{file_name}"
+        
+        with open(temp_path, 'wb') as new_file:
+            new_file.write(downloaded_file)
+            
+        # Upload to Gemini File API and analyze
+        uploaded_file = client.files.upload(file=temp_path)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=[uploaded_file, VIOLATION_PROMPT]
+        )
+        
+        # Clean up local file
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+            
+        # Send result back to the Telegram chat
+        bot.reply_to(message, response.text)
+        
+    except Exception as e:
+        bot.reply_to(message, f"❌ Error processing document: {str(e)}")
+
+if __name__ == "__main__":
+    print("Bot is starting and polling for messages...")
+    # Start polling so it listens continuously for incoming messages in Telegram
     bot.infinity_polling()
