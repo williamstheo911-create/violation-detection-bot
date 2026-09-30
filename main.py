@@ -40,9 +40,9 @@ def handle_photo(message):
         file_info = bot.get_file(message.photo[-1].file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
-        # Using gemini-2.0-flash
+        # Using gemini-3.8-flash
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model='gemini-3.8-flash',
             contents=[
                 types.Part.from_bytes(
                     data=downloaded_file,
@@ -70,7 +70,7 @@ def handle_document(message):
         mime_type = 'application/pdf' if file_name.lower().endswith('.pdf') else 'image/jpeg'
         
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model='gemini-3.8-flash',
             contents=[
                 types.Part.from_bytes(
                     data=downloaded_file,
