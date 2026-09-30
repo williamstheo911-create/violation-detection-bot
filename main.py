@@ -28,7 +28,7 @@ Provide a clear, concise report:
 def send_welcome(message):
     bot.reply_to(
         message, 
-        "Hello! Send me any document, photo, or image, and I will scan it for violations and send the results directly here."
+        "Hello! Send me any document, photo, or image (like a Driver/Vehicle Examination Report), and I will scan it for violations and send the results directly here."
     )
 
 # Handle Photos
@@ -47,10 +47,10 @@ def handle_photo(message):
         with open(temp_path, 'wb') as new_file:
             new_file.write(downloaded_file)
             
-        # Upload to Gemini File API and analyze
+        # Upload to Gemini File API and analyze using gemini-1.5-flash
         uploaded_file = client.files.upload(file=temp_path)
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-1.5-flash',
             contents=[uploaded_file, VIOLATION_PROMPT]
         )
         
@@ -79,10 +79,10 @@ def handle_document(message):
         with open(temp_path, 'wb') as new_file:
             new_file.write(downloaded_file)
             
-        # Upload to Gemini File API and analyze
+        # Upload to Gemini File API and analyze using gemini-1.5-flash
         uploaded_file = client.files.upload(file=temp_path)
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-1.5-flash',
             contents=[uploaded_file, VIOLATION_PROMPT]
         )
         
@@ -98,5 +98,4 @@ def handle_document(message):
 
 if __name__ == "__main__":
     print("Bot is starting and polling for messages...")
-    # Start polling so it listens continuously for incoming messages in Telegram
     bot.infinity_polling()
